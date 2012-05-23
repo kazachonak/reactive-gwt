@@ -10,15 +10,20 @@ package reactive
  * Logger.all foreach println
  * Make sure you're in the right Observing scope!
  */
-object Logger {
+object Logger extends Observing {
   /**
    * Supported logging levels, in order of most inclusive to most limited
    * (i.e., when setting the logging level, each level includes events
    * that are logged at levels to the right of it).
    * Do not assume levels ids won't change!
    */
-  object Levels extends Enumeration {
-    val Trace, Warn, Error, None = Value
+  object Levels {
+    case class Value(id: Int)
+    val Trace = Value(0)
+    val Warn = Value(1)
+    val Error = Value(2)
+    val None = Value(3)
+    val values = List(Trace, Warn, Error, None)
   }
 
   private[reactive] val allES = new EventSource[(Levels.Value, Logger#LogEvent)] {}

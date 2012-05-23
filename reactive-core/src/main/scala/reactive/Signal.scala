@@ -46,7 +46,7 @@ trait Signal[+T] extends Forwardable[T] {
    * b represents a Signal whose value is always 1 greater than a.
    * Whenever a fires an event of x, b fires an event of x+1.
    */
-  def map[U, S](f: T => U)(implicit canMapSignal: CanMapSignal[U, S]): S = canMapSignal.map(this, f)
+  def map[U, S](f: T => U)(implicit canMapSignal: CanMapSignal[U, S], observing: Observing): S = canMapSignal.map(this, f)(observing)
 
   /**
    * Returns a new Signal or EventStream,
@@ -77,13 +77,13 @@ trait Signal[+T] extends Forwardable[T] {
    * new EventStream that corresponds fires the events of whichever
    * EventStream is returns by f for the Signal's current value.
    */
-  def flatMap[FunRet, Ret](f: T => FunRet)(implicit canFlatMapSignal: CanFlatMapSignal[Signal, FunRet, Ret]): Ret = canFlatMapSignal.flatMap(this, f)
+  def flatMap[FunRet, Ret](f: T => FunRet)(implicit canFlatMapSignal: CanFlatMapSignal[Signal, FunRet, Ret], observing: Observing): Ret = canFlatMapSignal.flatMap(this, f)(observing)
 
   /**
    * Return a new Signal whose initial value is f(initial, parent.now).
    * Whenever the parent's value changes, the signal's value changes to f(previous, parent.now)
    */
-  def foldLeft[U](initial: U)(f: (U, T) => U): Signal[U] = new ChildSignal[T, U, U](this, f(initial, now), identity) {
+  def foldLeft[U](initial: U)(f: (U, T) => U)(implicit observing: Observing): Signal[U] = new ChildSignal[T, U, U](this, f(initial, now), identity, observing) {
     override def debugName = Signal.this.debugName+".foldLeft("+initial+")("+f+")"
     def parentHandler = (x, last) => {
       val next = f(last, x)
@@ -98,7 +98,7 @@ trait Signal[+T] extends Forwardable[T] {
    * @param that the other Signal
    * @return the Tuple2-valued Signal
    */
-  def zip[U](that: Signal[U]): Signal[(T, U)] = this flatMap { v1 =>
+  def zip[U](that: Signal[U])(implicit observing: Observing): Signal[(T, U)] = this flatMap { v1 =>
     that map { v2 =>
       (v1, v2)
     }
@@ -111,14 +111,14 @@ trait Signal[+T] extends Forwardable[T] {
    * For instance, if two Vars have a bidirectionally-enforced
    * mathematical relationship that can produce rounding errors.
    */
-  def nonrecursive: Signal[T] = new NonrecursiveSignal[T](this)
+  def nonrecursive(implicit observing: Observing): Signal[T] = new NonrecursiveSignal[T](this, observing)
 
   /**
    * Returns a derived Signal that only fires change events that are not equal to the
    * previous value. This can be used to prevent infinite recursion between multiple
    * signals that are mutually dependent in a consistent manner.
    */
-  def distinct: Signal[T] = new DistinctSignal[T](this)
+  def distinct(implicit observing: Observing): Signal[T] = new DistinctSignal[T](this, observing)
 
   private type WithVolatility[T] = (T, () => Boolean)
 
@@ -128,7 +128,7 @@ trait Signal[+T] extends Forwardable[T] {
    * The implementation delegates propagation to an actor (scala standard library), so
    * values are handled sequentially.
    */
-  def nonblocking: Signal[T] = new NonBlockingSignal[T](this)
+//  def nonblocking: Signal[T] = new NonBlockingSignal[T](this)
 
   /**
    * Returns a tuple-valued Signal whose value includes a function for testing staleness.
@@ -146,7 +146,7 @@ trait Signal[+T] extends Forwardable[T] {
    */
   //TODO does this belong in Signal? Maybe only in EventStream? After all, it makes no sense for 'now' to include the staleness function; now._2() will always be false
   //TODO maybe a better solution is takeUntil(s: Signal[_] | EventStream[_]), as in Rx for .NET
-  def zipWithStaleness: Signal[(T, () => Boolean)] = new ChildSignal[T, WithVolatility[T], WithVolatility[T]](this, (now, new Volatility), identity) {
+  def zipWithStaleness(implicit observing: Observing): Signal[(T, () => Boolean)] = new ChildSignal[T, WithVolatility[T], WithVolatility[T]](this, (now, new Volatility), identity, observing) {
     override def debugName = parent.debugName+".zipWithStaleness"
     def parentHandler = {
       case (parentEvent, (oldValue, volatility: Volatility)) =>
@@ -170,7 +170,7 @@ trait Signal[+T] extends Forwardable[T] {
    * }}}
    * @usecase def sequence[B]: Signal[List[B]]
    */
-  def sequence[B](implicit ev: T <:< Seq[Signal[B]]): Signal[List[B]] = {
+  def sequence[B](implicit ev: T <:< Seq[Signal[B]], observing: Observing): Signal[List[B]] = {
     def cont(remaining: List[Signal[B]])(agg: List[B]): B => Signal[List[B]] = remaining match {
       case Nil          => x => Val(x :: agg) // should only be called if remaining is originally Nil
       case one :: Nil   => x => one map { _ :: x :: agg }
@@ -190,7 +190,7 @@ private[reactive] class Volatility extends (() => Boolean) {
   def apply() = stale
 }
 
-protected abstract class ChildSignal[T, U, S](protected val parent: Signal[T], protected var state: S, initial: S => U) extends Signal[U] {
+protected abstract class ChildSignal[T, U, S](protected val parent: Signal[T], protected var state: S, initial: S => U, observing: Observing) extends Signal[U] {
   val change = new EventSource[U] {
     override def debugName = ChildSignal.this.debugName+".change"
     val ref = ph
@@ -203,10 +203,10 @@ protected abstract class ChildSignal[T, U, S](protected val parent: Signal[T], p
   private val parentListener: T => Unit = NamedFunction(debugName+".parentListener")(x => synchronized {
     state = ph(x, state)
   })
-  parent.change addListener parentListener
+  parent.change.addListener(parentListener, observing)
 }
 
-protected class MappedSignal[T, U](parent: Signal[T], f: T => U) extends ChildSignal[T, U, Unit](parent, (), _ => f(parent.now)) {
+protected class MappedSignal[T, U](parent: Signal[T], f: T => U, observing: Observing) extends ChildSignal[T, U, Unit](parent, (), _ => f(parent.now), observing) {
   override def debugName = parent.debugName+".map("+f+")"
   def parentHandler = (x, _) => {
     val u = f(x)
@@ -215,31 +215,31 @@ protected class MappedSignal[T, U](parent: Signal[T], f: T => U) extends ChildSi
   }
 }
 
-protected class NonBlockingSignal[T](parent: Signal[T]) extends ChildSignal[T, T, Unit](parent, parent.now, _ => parent.now) {
-  override def debugName = parent.debugName+".nonblocking"
-  import scala.actors.Actor._
-  private val delegate = actor {
-    loop {
-      receive {
-        case x: T =>
-          current = x
-          change.fire(x)
-      }
-    }
-  }
-  def parentHandler = {
-    case (x, _) =>
-      delegate ! x
-  }
-}
+//protected class NonBlockingSignal[T](parent: Signal[T]) extends ChildSignal[T, T, Unit](parent, parent.now, _ => parent.now) {
+//  override def debugName = parent.debugName+".nonblocking"
+//  import scala.actors.Actor._
+//  private val delegate = actor {
+//    loop {
+//      receive {
+//        case x: T =>
+//          current = x
+//          change.fire(x)
+//      }
+//    }
+//  }
+//  def parentHandler = {
+//    case (x, _) =>
+//      delegate ! x
+//  }
+//}
 
 trait CanMapSignal[-U, S] {
-  def map[T](parent: Signal[T], f: T => U): S
+  def map[T](parent: Signal[T], f: T => U)(implicit observing: Observing): S
 }
 
 trait LowPriorityCanMapSignalImplicits {
   implicit def canMapSignal[U]: CanMapSignal[U, Signal[U]] = new CanMapSignal[U, Signal[U]] {
-    def map[T](parent: Signal[T], f: T => U): Signal[U] = new MappedSignal[T, U](parent, f)
+    def map[T](parent: Signal[T], f: T => U)(implicit observing: Observing): Signal[U] = new MappedSignal[T, U](parent, f, observing)
   }
 }
 object CanMapSignal extends LowPriorityCanMapSignalImplicits {
@@ -249,13 +249,13 @@ object CanMapSignal extends LowPriorityCanMapSignalImplicits {
 }
 
 trait CanFlatMapSignal[-Parent[_], -FunRet, +Ret] {
-  def flatMap[T](parent: Parent[T], f: T => FunRet): Ret
+  def flatMap[T](parent: Parent[T], f: T => FunRet)(implicit observing: Observing): Ret
 }
 
 trait LowPriorityCanFlatMapSignalImplicits {
 
   implicit def canFlatMapSignal[U]: CanFlatMapSignal[Signal, Signal[U], Signal[U]] = new CanFlatMapSignal[Signal, Signal[U], Signal[U]] {
-    def flatMap[T](parent: Signal[T], f: T => Signal[U]): Signal[U] = new FlatMappedSignal[T, U](parent, f)
+    def flatMap[T](parent: Signal[T], f: T => Signal[U])(implicit observing: Observing): Signal[U] = new FlatMappedSignal[T, U](parent, f, observing)
   }
 }
 object CanFlatMapSignal extends LowPriorityCanFlatMapSignalImplicits {
@@ -263,11 +263,11 @@ object CanFlatMapSignal extends LowPriorityCanFlatMapSignalImplicits {
 //    def flatMap[T, U](parent: Signal[T], f: T => SeqSignal[U]): SeqSignal[U] = SeqSignal(canFlatMapSignal.flatMap(parent, f).map(_.underlying)) //new FlatMappedSeqSignal[T, U](parent, f)
 //  }
   implicit def canFlatMapEventStream[U]: CanFlatMapSignal[Signal, EventStream[U], EventStream[U]] = new CanFlatMapSignal[Signal, EventStream[U], EventStream[U]] {
-    def flatMap[T](parent: Signal[T], f: T => EventStream[U]): EventStream[U] = {
+    def flatMap[T](parent: Signal[T], f: T => EventStream[U])(implicit observing: Observing): EventStream[U] = {
       val parentChange = new EventSource[T]
       val f0 = parentChange.fire _
-      parent.change addListener f0
-      new parentChange.FlatMapped(Some(parent.now))(f) {
+      parent.change.addListener(f0, observing)
+      new parentChange.FlatMapped(Some(parent.now))(f, observing) {
         private val f1 = f0
         override def debugName = "%s.flatMap(%s)" format (parent.debugName, f)
       }
@@ -275,23 +275,23 @@ object CanFlatMapSignal extends LowPriorityCanFlatMapSignalImplicits {
   }
 }
 
-protected class FlatMappedSignal[T, U](parent: Signal[T], f: T => Signal[U]) extends ChildSignal[T, U, Signal[U]](parent, f(parent.now), _.now) {
+protected class FlatMappedSignal[T, U](parent: Signal[T], f: T => Signal[U], observing: Observing) extends ChildSignal[T, U, Signal[U]](parent, f(parent.now), _.now, observing) {
   override def debugName = "%s.flatMap(%s)" format (parent.debugName, f)
   private val thunk: U => Unit = x => synchronized {
     current = x
     change fire x
   }
-  state.change addListener thunk
+  state.change.addListener(thunk, observing)
   def parentHandler = (x, curSig) => {
     curSig.change removeListener thunk
     val newSig = f(x)
     thunk(newSig.now)
-    newSig.change addListener thunk
+    newSig.change.addListener(thunk, observing)
     newSig
   }
 }
 
-protected class NonrecursiveSignal[T](parent: Signal[T]) extends ChildSignal[T, T, Unit](parent, (), _ => parent.now) {
+protected class NonrecursiveSignal[T](parent: Signal[T], observing: Observing) extends ChildSignal[T, T, Unit](parent, (), _ => parent.now, observing) {
   override def debugName = parent.debugName+".nonrecursive"
   protected val changing = new scala.util.DynamicVariable(false)
   def parentHandler = (x, _) => {
@@ -302,7 +302,7 @@ protected class NonrecursiveSignal[T](parent: Signal[T]) extends ChildSignal[T, 
   }
 }
 
-protected class DistinctSignal[T](parent: Signal[T]) extends ChildSignal[T, T, Unit](parent, (), _ => parent.now) {
+protected class DistinctSignal[T](parent: Signal[T], observing: Observing) extends ChildSignal[T, T, Unit](parent, (), _ => parent.now, observing) {
   override def debugName = parent.debugName+".distinct"
   def parentHandler = (x, _) => {
     if (x != current) {

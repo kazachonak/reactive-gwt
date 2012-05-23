@@ -6,8 +6,12 @@ import scala.collection.mutable.ArrayBuffer
  * Based on Java code by Neil Jones at http://bix.ucsd.edu/bioalgorithms/downloads/code/LCS.java
  */
 object LCS {
-  object Direction extends Enumeration {
-    val Neither, Up, Left, UpAndLeft = Value
+  object Direction {
+    case class Value(id: Int)
+    val Neither = Value(0)
+    val Up = Value(1)
+    val Left = Value(2)
+    val UpAndLeft = Value(3)
   }
   import Direction._
   def lcs[T](a: Seq[T], b: Seq[T]): Seq[T] = {

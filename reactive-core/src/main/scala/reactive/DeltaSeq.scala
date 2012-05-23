@@ -31,17 +31,17 @@ object DeltaSeq extends SeqFactory[DeltaSeq] {
   def fromSeq[A](xs: Seq[A]) = new DeltaSeq[A] {
     val underlying = xs
     val fromDelta = startDelta(xs)
-    val signal: SeqSignal[A] = new Val(this) with SeqSignal[A]
+    def signal(implicit observing_ : Observing): SeqSignal[A] = new Val(this) with SeqSignal[A]
   }
   override def apply[A](xs: A*) = fromSeq(xs)
 
   def updatedByValue[T](prev: DeltaSeq[T], seq: Seq[T]): DeltaSeq[T] = new DeltaSeq[T] {
-    val signal = prev.signal
+    def signal(implicit observing: Observing) = prev.signal(observing)
     val underlying = seq
     val fromDelta = Batch(LCS.lcsdiff[T, T](prev.underlying, seq, _ == _): _*)
   }
   def updatedByDeltas[T](prev0: DeltaSeq[T], delta: SeqDelta[T, T]): DeltaSeq[T] = new DeltaSeq[T] {
-    val signal = prev0.signal
+    def signal(implicit observing: Observing) = prev0.signal(observing)
     val fromDelta = delta
     val underlying = SeqDelta.patch(prev0.underlying, fromDelta)
   }
@@ -81,7 +81,7 @@ trait DeltaSeq[+T] extends immutable.Seq[T] with GenericTraversableTemplate[T, D
    */
     def updatedFromParent(parentUpdated: DeltaSeq[T]): This
 
-    lazy val signal = new SeqSignal[V] {
+    def signal(implicit observing: Observing) = new SeqSignal[V] {
       private var current: This = Transformed.this.asInstanceOf[This]
       current.underlying
       def now = current
@@ -90,7 +90,7 @@ trait DeltaSeq[+T] extends immutable.Seq[T] with GenericTraversableTemplate[T, D
         current.underlying
         change fire now
       }
-      parent.signal.change addListener pc
+      parent.signal(observing).change.addListener(pc, observing)
       lazy val change = new EventSource[DeltaSeq[V]] {}
     }
   }
@@ -533,7 +533,7 @@ trait DeltaSeq[+T] extends immutable.Seq[T] with GenericTraversableTemplate[T, D
 
   override def companion = DeltaSeq
 
-  def signal: SeqSignal[T]
+  def signal(implicit observing: Observing): SeqSignal[T]
 
   val underlying: Seq[T]
   def fromDelta: SeqDelta[T, T]
@@ -550,7 +550,7 @@ trait DeltaSeq[+T] extends immutable.Seq[T] with GenericTraversableTemplate[T, D
       new DeltaSeq[T] {
         val underlying = xs.toList
         def fromDelta = DeltaSeq.this.fromDelta
-        def signal = DeltaSeq.this.signal
+        def signal(implicit observing: Observing) = DeltaSeq.this.signal(observing)
       }
   }
 

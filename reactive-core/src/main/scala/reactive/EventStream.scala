@@ -1,8 +1,6 @@
 package reactive
-
-import scala.ref.WeakReference
 import scala.util.DynamicVariable
-import scala.annotation.tailrec
+
 
 object EventSource {
   @deprecated("Use Logger.defaultLevel, this does nothing anymore")
@@ -63,7 +61,7 @@ trait EventStream[+T] extends Forwardable[T] {
    * @param f the function that transforms events fired by this EventStream
    * into events to be fired by the resulting EventStream.
    */
-  def map[U](f: T => U): EventStream[U]
+  def map[U](f: T => U)(implicit observing: Observing): EventStream[U]
   /**
    * Create a new EventStream that consists of the events of
    * the EventStreams returned by f. f is applied on every
@@ -75,14 +73,14 @@ trait EventStream[+T] extends Forwardable[T] {
    * @param f the function that is applied for every event
    * to produce the next segment of the resulting EventStream.
    */
-  def flatMap[U](f: T => EventStream[U]): EventStream[U]
+  def flatMap[U](f: T => EventStream[U])(implicit observing: Observing): EventStream[U]
   /**
    * Returns a new EventStream that propagates a subset of the events that
    * this EventStream fires.
    * @param f the predicate function that determines which events will
    * be fired by the new EventStream.
    */
-  def filter(f: T => Boolean): EventStream[T]
+  def filter(f: T => Boolean)(implicit observing: Observing): EventStream[T]
   /**
    * Filter and map in one step. Takes a PartialFunction.
    * Whenever an event is received, if the PartialFunction
@@ -90,14 +88,14 @@ trait EventStream[+T] extends Forwardable[T] {
    * it will be fired.
    * @param f the PartialFunction
    */
-  def collect[U](pf: PartialFunction[T, U]): EventStream[U]
+  def collect[U](pf: PartialFunction[T, U])(implicit observing: Observing): EventStream[U]
   /**
    * Returns a new EventStream that propagates this EventStream's events
    * until the predicate returns false.
    * @param p the precate function, taking an event as its argument
    * and returning true if event propagation should continue
    */
-  def takeWhile(p: T => Boolean): EventStream[T]
+  def takeWhile(p: T => Boolean)(implicit observing: Observing): EventStream[T]
   /**
    * Allows one, in a functional manner, to respond to an event while
    * taking into account past events.
@@ -113,7 +111,7 @@ trait EventStream[+T] extends Forwardable[T] {
    * would return an EventStream that, for every (integer) event fired
    * by es, would fire the sum of all events that have been fired by es.
    */
-  def foldLeft[U](initial: U)(f: (U, T) => U): EventStream[U]
+  def foldLeft[U](initial: U)(f: (U, T) => U)(implicit observing: Observing): EventStream[U]
   /**
    * Union of two EventStreams.
    * Returns a new EventStream that consists of all events
@@ -121,14 +119,14 @@ trait EventStream[+T] extends Forwardable[T] {
    * @param that the other EventStream to combine in the resulting
    * EventStream.
    */
-  def |[U >: T](that: EventStream[U]): EventStream[U]
+  def |[U >: T](that: EventStream[U])(implicit observing: Observing): EventStream[U]
   /**
    * Returns a Signal whose value is initially the 'init' parameter,
    * and after every event fired by this EventStream, the value of
    * that event.
    * @param init the initial value of the signal
    */
-  def hold[U >: T](init: U): Signal[U]
+  def hold[U >: T](init: U)(implicit observing: Observing): Signal[U]
 
   /**
    * Returns a derived EventStream that does not fire events
@@ -136,14 +134,14 @@ trait EventStream[+T] extends Forwardable[T] {
    * preventing infinite recursion between multiple event streams
    * that are mutually dependent.
    */
-  def nonrecursive: EventStream[T]
+  def nonrecursive(implicit observing: Observing): EventStream[T]
 
   /**
    * Returns a derived EventStream that only fires events that are not equal to the
    * previous event. This can be used to prevent infinite recursion between multiple
    * event streams that are mutually dependent in a consistent manner.
    */
-  def distinct: EventStream[T]
+  def distinct(implicit observing: Observing): EventStream[T]
 
   /**
    * Returns a derived event stream in which event propagation does not happen on the thread firing it and block it.
@@ -151,7 +149,7 @@ trait EventStream[+T] extends Forwardable[T] {
    * The implementation delegates propagation to an actor (scala standard library), so
    * events are handled sequentially.
    */
-  def nonblocking: EventStream[T]
+//  def nonblocking: EventStream[T]
 
   /**
    * Returns an EventStream whose tuple-valued events include a function for testing staleness.
@@ -167,7 +165,7 @@ trait EventStream[+T] extends Forwardable[T] {
    * Example usage:
    * for((v, isSuperseded) <- eventStream.zipWithStaleness) { doSomework(); if(!isSuperseded()) doSomeMoreWork() }
    */
-  def zipWithStaleness: EventStream[(T, () => Boolean)]
+  def zipWithStaleness(implicit observing: Observing): EventStream[(T, () => Boolean)]
 
   /**
    * Returns an EventStream that only fires events that are not
@@ -177,9 +175,9 @@ trait EventStream[+T] extends Forwardable[T] {
    * necessary, you may want to wait until the user has not typed
    * anything for a full second.
    */
-  def throttle(period: Long): EventStream[T]
+  def throttle(period: Long)(implicit observing: Observing): EventStream[T]
 
-  private[reactive] def addListener(f: (T) => Unit): Unit
+  private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit
   private[reactive] def removeListener(f: (T) => Unit): Unit
 
   def debugString: String
@@ -200,7 +198,7 @@ object NamedFunction {
  */
 //TODO perhaps EventSource = SimpleEventStream + fire
 class EventSource[T] extends EventStream[T] with Logger {
-  case class HasListeners(listeners: List[WeakReference[T => Unit]]) extends LogEventPredicate
+  case class HasListeners(listeners: List[T => Unit]) extends LogEventPredicate
   case class FiringEvent(event: T, listenersCount: Int, collectedCount: Int) extends LogEventPredicate
   case class AddingListener(listener: T => Unit) extends LogEventPredicate
   case class AddedForeachListener(listener: T => Unit) extends LogEventPredicate
@@ -213,29 +211,31 @@ class EventSource[T] extends EventStream[T] with Logger {
    */
   protected val purgeThreshold = 10
 
-  abstract class ChildEventSource[U, S](protected var state: S) extends EventSource[U] {
+  abstract class ChildEventSource[U, S](protected var state: S, observing: Observing) extends EventSource[U] {
     private val parent = EventSource.this
     protected def handler: (T, S) => S
     private val h = handler
     protected val listener: T => Unit = NamedFunction(debugName+".listener")(v => synchronized {
       state = h(v, state)
     })
-    parent addListener listener
+    parent.addListener(listener, observing)
   }
 
-  class FlatMapped[U](initial: Option[T])(val f: T => EventStream[U]) extends ChildEventSource[U, Option[EventStream[U]]](initial map f) {
+  class FlatMapped[U](initial: Option[T])(val f: T => EventStream[U], observing: Observing)
+        extends ChildEventSource[U, Option[EventStream[U]]](initial map f, observing) {
     override def debugName = "%s.flatMap(%s)" format (EventSource.this.debugName, f)
     val thunk: U => Unit = fire _
-    state foreach { _ addListener thunk }
+    state foreach { _.addListener(thunk, observing) }
     def handler = (parentEvent, lastES) => {
       lastES foreach { _ removeListener thunk }
       val newES = Some(f(parentEvent))
-      newES foreach { _ addListener thunk }
+      newES foreach { _.addListener(thunk, observing) }
       newES
     }
   }
 
-  class Throttled(delay: Long) extends ChildEventSource[T, (Option[T], Long)](None -> System.currentTimeMillis) {
+  class Throttled(delay: Long, observing: Observing)
+        extends ChildEventSource[T, (Option[T], Long)](None -> System.currentTimeMillis, observing) {
     override def debugName = EventSource.this.debugName+".throttle("+delay+")"
     private def onTimer {
       val t1 = System.currentTimeMillis
@@ -254,7 +254,7 @@ class EventSource[T] extends EventStream[T] with Logger {
     }
   }
 
-  class FoldedLeft[U](initial: U, f: (U, T) => U) extends ChildEventSource[U, U](initial) {
+  class FoldedLeft[U](initial: U, f: (U, T) => U, observing: Observing) extends ChildEventSource[U, U](initial, observing) {
     override def debugName = "%s.foldLeft(%s)(%s)" format (EventSource.this.debugName, initial, f)
     def handler = (event, last) => {
       val next = f(last, event)
@@ -263,7 +263,7 @@ class EventSource[T] extends EventStream[T] with Logger {
     }
   }
 
-  class Collected[U](pf: PartialFunction[T, U]) extends ChildEventSource[U, Unit] {
+  class Collected[U](pf: PartialFunction[T, U], observing: Observing) extends ChildEventSource[U, Unit]((), observing) {
     override def debugName = "%s.collect(%s)" format (EventSource.this.debugName, pf)
     private val pf0 = pf
     def handler = (event, _) => {
@@ -274,23 +274,23 @@ class EventSource[T] extends EventStream[T] with Logger {
 
   private type WithVolatility[T] = (T, () => Boolean)
 
-  class ActorEventStream extends ChildEventSource[T, Unit](()) {
-    override def debugName = "%s.nonblocking" format (EventSource.this.debugName)
-    import scala.actors.Actor._
-    private val delegate = actor {
-      loop {
-        receive {
-          case x: T => fire(x)
-        }
-      }
-    }
-    def handler = {
-      case (parentEvent, _) =>
-        delegate ! parentEvent
-    }
-  }
+//  class ActorEventStream(observing: Observing) extends ChildEventSource[T, Unit]((), observing) {
+//    override def debugName = "%s.nonblocking" format (EventSource.this.debugName)
+//    import scala.actors.Actor._
+//    private val delegate = actor {
+//      loop {
+//        receive {
+//          case x: T => fire(x)
+//        }
+//      }
+//    }
+//    def handler = {
+//      case (parentEvent, _) =>
+//        delegate ! parentEvent
+//    }
+//  }
 
-  private var listeners: List[WeakReference[T => Unit]] = Nil
+  private var listeners: List[T => Unit] = Nil
 
   /**
    * Whether this EventStream has any listeners depending on it
@@ -302,7 +302,7 @@ class EventSource[T] extends EventStream[T] with Logger {
   def debugString = {
     "%s\n  listeners%s".format(
       debugName,
-      listeners.flatMap(_.get).mkString("\n    ", "\n    ", "\n")
+      listeners.mkString("\n    ", "\n    ", "\n")
     )
   }
 
@@ -315,35 +315,28 @@ class EventSource[T] extends EventStream[T] with Logger {
       FiringEvent(
         event,
         listeners.size,
-        listeners.length - listeners.count(_.get ne None)
+        0
       )
     )
     trace(HasListeners(listeners))
-    var empty = 0
-    @tailrec def next(ls: List[WeakReference[T => Unit]]): Unit = ls match {
-      case Nil =>
-      case xs =>
-        val l = xs.head.get
-        if (l.isDefined) l.get apply event else empty += 1
-        next(ls.tail)
-    }
-    next(listeners)
-    if (empty >= purgeThreshold) listeners = listeners.filter(_.get.isDefined)
+    listeners.foreach(_.apply(event))
   }
 
-  def flatMap[U](f: T => EventStream[U]): EventStream[U] =
-    new FlatMapped(None)(f)
+  def flatMap[U](f: T => EventStream[U])(implicit observing: Observing): EventStream[U] =
+    new FlatMapped(None)(f, observing)
 
   @deprecated("Use eventStream.hold(initial).flatMap(f)")
-  def flatMap[U](initial: T)(f: T => EventStream[U]): EventStream[U] =
-    new FlatMapped(Some(initial))(f) {
+  def flatMap[U](initial: T)(f: T => EventStream[U])(implicit observing: Observing): EventStream[U] =
+    new FlatMapped(Some(initial))(f, observing) {
       override def debugName = "%s.flatMap(%s)(%s)" format (EventSource.this.debugName, initial, f)
     }
 
-  def collect[U](pf: PartialFunction[T, U]): EventStream[U] = new Collected(pf)
+  def collect[U](pf: PartialFunction[T, U])(implicit observing: Observing): EventStream[U] = {
+    new Collected(pf, observing)
+  }
 
-  def map[U](f: T => U): EventStream[U] = {
-    new ChildEventSource[U, Unit] {
+  def map[U](f: T => U)(implicit observing: Observing): EventStream[U] = {
+    new ChildEventSource[U, Unit]((), observing) {
       override def debugName = "%s.map(%s)" format (EventSource.this.debugName, f)
       val f0 = f
       def handler = (event, _) => this fire f(event)
@@ -353,29 +346,35 @@ class EventSource[T] extends EventStream[T] with Logger {
   def foreach(f: T => Unit)(implicit observing: Observing): Unit = {
     observing.addRef(f)
     observing.addRef(this)
-    addListener(f)
+    addListener(f, observing)
     trace(AddedForeachListener(f))
     trace(HasListeners(listeners))
   }
 
-  def filter(f: T => Boolean): EventStream[T] = new ChildEventSource[T, Unit] {
-    override def debugName = "%s.filter(%s)" format (EventSource.this.debugName, f)
-    val f0 = f
-    def handler = (event, _) => if (f(event)) fire(event)
+  def filter(f: T => Boolean)(implicit observing: Observing): EventStream[T] = {
+    new ChildEventSource[T, Unit]((), observing) {
+      override def debugName = "%s.filter(%s)" format (EventSource.this.debugName, f)
+      val f0 = f
+      def handler = (event, _) => if (f(event)) fire(event)
+    }
   }
 
-  def takeWhile(p: T => Boolean): EventStream[T] = new ChildEventSource[T, Unit] {
-    override def debugName = EventSource.this.debugName+".takeWhile("+p+")"
-    def handler = (event, _) =>
-      if (p(event))
-        fire(event)
-      else
-        EventSource.this.removeListener(listener)
+  def takeWhile(p: T => Boolean)(implicit observing: Observing): EventStream[T] = {
+    new ChildEventSource[T, Unit]((), observing) {
+      override def debugName = EventSource.this.debugName+".takeWhile("+p+")"
+      def handler = (event, _) =>
+        if (p(event))
+          fire(event)
+        else
+          EventSource.this.removeListener(listener)
+    }
   }
 
-  def foldLeft[U](initial: U)(f: (U, T) => U): EventStream[U] = new FoldedLeft(initial, f)
+  def foldLeft[U](initial: U)(f: (U, T) => U)(implicit observing: Observing): EventStream[U] = {
+    new FoldedLeft(initial, f, observing)
+  }
 
-  def nonrecursive: EventStream[T] = new ChildEventSource[T, Unit] {
+  def nonrecursive(implicit observing: Observing): EventStream[T] = new ChildEventSource[T, Unit]((), observing) {
     override def debugName = "%s.nonrecursive" format (EventSource.this.debugName)
     protected val firing = new scala.util.DynamicVariable(false)
     def handler = (event, _) => if (!firing.value) firing.withValue(true) {
@@ -383,29 +382,31 @@ class EventSource[T] extends EventStream[T] with Logger {
     }
   }
 
-  def distinct: EventStream[T] = {
+  def distinct(implicit observing: Observing): EventStream[T] = {
     val folded = new FoldedLeft[List[T]](Nil, {
       case (Nil, e)      => e :: Nil
       case (old :: _, e) => e :: old :: Nil
-    })
+    }, observing)
     new folded.Collected({
       case e :: Nil                  => e
       case e :: old :: _ if e != old => e
-    }) {
+    }, observing) {
       override def debugName = EventSource.this.debugName+".distinct"
     }
   }
 
-  def |[U >: T](that: EventStream[U]): EventStream[U] = new EventSource[U] {
-    override def debugName = "("+EventSource.this.debugName+" | "+that.debugName+")"
-    val parent = EventSource.this
-    val f: U => Unit = fire _
-
-    EventSource.this addListener f
-    that addListener f
+  def |[U >: T](that: EventStream[U])(implicit observing: Observing): EventStream[U] = {
+    new EventSource[U] {
+      override def debugName = "("+EventSource.this.debugName+" | "+that.debugName+")"
+      val parent = EventSource.this
+      val f: U => Unit = fire _
+  
+      EventSource.this.addListener(f, observing)
+      that.addListener(f, observing)
+    }
   }
 
-  def hold[U >: T](init: U): Signal[U] = new Signal[U] {
+  def hold[U >: T](init: U)(implicit observing: Observing): Signal[U] = new Signal[U] {
     override def debugName = EventSource.this.debugName+".hold("+init+")"
     private lazy val initial: U = init
     private var current: U = init
@@ -414,31 +415,36 @@ class EventSource[T] extends EventStream[T] with Logger {
     val change = EventSource.this
 
     val f = (v: T) => current = v
-    change addListener f
+    change.addListener(f, observing)
   }
 
-  def zipWithStaleness: EventStream[(T, () => Boolean)] = new ChildEventSource[WithVolatility[T], Option[Volatility]](None) {
-    override def debugName = "%s.withStaleness" format EventSource.this.debugName
-    def handler = {
-      case (parentEvent, volatilityOption) =>
-        volatilityOption.foreach(_.stale = true)
-        val volatility = new Volatility
-        fire((parentEvent, volatility))
-        Some(volatility)
+  def zipWithStaleness(implicit observing: Observing): EventStream[(T, () => Boolean)] = {
+    new ChildEventSource[WithVolatility[T], Option[Volatility]](None, observing) {
+      override def debugName = "%s.withStaleness" format EventSource.this.debugName
+      def handler = {
+        case (parentEvent, volatilityOption) =>
+          volatilityOption.foreach(_.stale = true)
+          val volatility = new Volatility
+          fire((parentEvent, volatility))
+          Some(volatility)
+      }
     }
   }
 
-  def throttle(period: Long): EventStream[T] = new Throttled(period)
+  def throttle(period: Long)(implicit observing: Observing): EventStream[T] = {
+    new Throttled(period, observing)
+  }
 
-  def nonblocking: EventStream[T] = new ActorEventStream
+//  def nonblocking: EventStream[T] = new ActorEventStream
 
-  private[reactive] def addListener(f: (T) => Unit): Unit = synchronized {
+  private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit = synchronized {
     trace(AddingListener(f))
-    listeners :+= new WeakReference(f)
+    observing.onRemove(() => removeListener(f))
+    listeners :+= f
   }
   private[reactive] def removeListener(f: (T) => Unit): Unit = synchronized {
     //remove the last listener that is identical to f
-    listeners.lastIndexWhere(_.get.map(f.eq) getOrElse false) match {
+    listeners.lastIndexOf(f) match {
       case -1 =>
       case n =>
         listeners = listeners.patch(n, Nil, 1)
@@ -453,20 +459,20 @@ class EventSource[T] extends EventStream[T] with Logger {
  * @author nafg
  *
  */
-trait TracksAlive[T] extends EventSource[T] {
-  private val aliveVar = Var(false)
-  /**
-   * This signal indicates whether the event stream
-   * is being listened to
-   */
-  val alive: Signal[Boolean] = aliveVar.map{ x => x } // read only
-  override def foreach(f: T => Unit)(implicit observing: Observing) {
-    if (!aliveVar.now) {
-      aliveVar() = true
-    }
-    super.foreach(f)(observing)
-  }
-}
+//trait TracksAlive[T] extends EventSource[T] {
+//  private val aliveVar = Var(false)
+//  /**
+//   * This signal indicates whether the event stream
+//   * is being listened to
+//   */
+//  val alive: Signal[Boolean] = aliveVar.map{ x => x } // read only
+//  override def foreach(f: T => Unit)(implicit observing: Observing) {
+//    if (!aliveVar.now) {
+//      aliveVar() = true
+//    }
+//    super.foreach(f)(observing)
+//  }
+//}
 
 /**
  * This EventStream allows one to block events
@@ -537,20 +543,20 @@ trait EventStreamProxy[T] extends EventStream[T] {
   def self: EventStream[T]
 
   def debugString = self.debugString
-  def flatMap[U](f: T => EventStream[U]): EventStream[U] = self.flatMap[U](f)
-  def foldLeft[U](z: U)(f: (U, T) => U): EventStream[U] = self.foldLeft[U](z)(f)
-  def map[U](f: T => U): EventStream[U] = self.map[U](f)
+  def flatMap[U](f: T => EventStream[U])(implicit observing: Observing): EventStream[U] = self.flatMap[U](f)(observing)
+  def foldLeft[U](z: U)(f: (U, T) => U)(implicit observing: Observing): EventStream[U] = self.foldLeft[U](z)(f)(observing)
+  def map[U](f: T => U)(implicit observing: Observing): EventStream[U] = self.map[U](f)(observing)
   def foreach(f: T => Unit)(implicit observing: Observing): Unit = self.foreach(f)(observing)
-  def |[U >: T](that: EventStream[U]): EventStream[U] = self.|(that)
-  def filter(f: T => Boolean): EventStream[T] = self.filter(f)
-  def collect[U](pf: PartialFunction[T, U]): EventStream[U] = self.collect(pf)
-  def takeWhile(p: T => Boolean): EventStream[T] = self.takeWhile(p)
-  def hold[U >: T](init: U): Signal[U] = self.hold(init)
-  def nonrecursive: EventStream[T] = self.nonrecursive
-  def distinct: EventStream[T] = self.distinct
-  def nonblocking: EventStream[T] = self.nonblocking
-  def zipWithStaleness: EventStream[(T, () => Boolean)] = self.zipWithStaleness
-  private[reactive] def addListener(f: (T) => Unit): Unit = self.addListener(f)
+  def |[U >: T](that: EventStream[U])(implicit observing: Observing): EventStream[U] = self.|(that)(observing)
+  def filter(f: T => Boolean)(implicit observing: Observing): EventStream[T] = self.filter(f)(observing)
+  def collect[U](pf: PartialFunction[T, U])(implicit observing: Observing): EventStream[U] = self.collect(pf)(observing)
+  def takeWhile(p: T => Boolean)(implicit observing: Observing): EventStream[T] = self.takeWhile(p)(observing)
+  def hold[U >: T](init: U)(implicit observing: Observing): Signal[U] = self.hold(init)(observing)
+  def nonrecursive(implicit observing: Observing): EventStream[T] = self.nonrecursive(observing)
+  def distinct(implicit observing: Observing): EventStream[T] = self.distinct(observing)
+//  def nonblocking: EventStream[T] = self.nonblocking
+  def zipWithStaleness(implicit observing: Observing): EventStream[(T, () => Boolean)] = self.zipWithStaleness(observing)
+  private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit = self.addListener(f, observing)
   private[reactive] def removeListener(f: (T) => Unit): Unit = self.removeListener(f)
 
 }

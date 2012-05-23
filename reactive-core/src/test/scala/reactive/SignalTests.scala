@@ -124,38 +124,38 @@ class SignalTests extends FunSuite with ShouldMatchers with CollectEvents with P
     } should equal (List(4, 2))
   }
 
-  test("nonblocking: no re-entry") {
-    val v0 = Var(0)
-    val v = Var(1)
+//  test("nonblocking: no re-entry") {
+//    val v0 = Var(0)
+//    val v = Var(1)
+//
+//    var n = 0
+//    for {
+//      _ <- v0
+//      _ <- v.nonblocking
+//    } {
+//      n += 1
+//      n should equal (1)
+//      n -= 1
+//    }
+//
+//    for (a <- 1 to 10 toList) {
+//      scala.concurrent.ops.spawn {
+//        for (b <- 1 to 10)
+//          v () = v.now + 1
+//      }
+//    }
+//  }
 
-    var n = 0
-    for {
-      _ <- v0
-      _ <- v.nonblocking
-    } {
-      n += 1
-      n should equal (1)
-      n -= 1
-    }
-
-    for (a <- 1 to 10 toList) {
-      scala.concurrent.ops.spawn {
-        for (b <- 1 to 10)
-          v () = v.now + 1
-      }
-    }
-  }
-
-  test("Signals should fire change event after 'now' is set") {
-    def check[T, S[_] <: Signal[_]](sig: S[T]): S[T] = { sig.change =>> (_ should equal (sig.now)); sig }
-    val v = check(Var(10))
-    val mapped = check(v.map(_ + 10))
-    val flatMapped = check(v.flatMap(x => Var(x + 15): Signal[Int]))
-    val distinct = check(v.distinct)
-    val nr = check(v.nonrecursive)
-    val nb = check(v.nonblocking)
-    v () = 20
-  }
+//  test("Signals should fire change event after 'now' is set") {
+//    def check[T, S[_] <: Signal[_]](sig: S[T]): S[T] = { sig.change =>> (_ should equal (sig.now)); sig }
+//    val v = check(Var(10))
+//    val mapped = check(v.map(_ + 10))
+//    val flatMapped = check(v.flatMap(x => Var(x + 15): Signal[Int]))
+//    val distinct = check(v.distinct)
+//    val nr = check(v.nonrecursive)
+//    val nb = check(v.nonblocking)
+//    v () = 20
+//  }
 
   test("sequence") {
     val bufSig = BufferSignal(Var(1), Var(2), Var(3), Var(4))

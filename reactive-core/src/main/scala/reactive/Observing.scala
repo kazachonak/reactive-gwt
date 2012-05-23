@@ -44,6 +44,21 @@ trait Observing {
    * eventStream.change.foreach{event => action} [(observing)]
    */
   def on[T](e: EventSource[T])(f: T => Unit) = e.foreach(f)(this)
+  
+  
+  private[reactive] def onRemove(f: () => Unit) = {
+    removeListeners :+= f
+  }
+  private var removeListeners: List[() => Unit] = Nil
+  
+  /**
+   * Don't forget to call it!
+   */
+  def removeReactiveListeners = {
+    removeListeners.foreach(_())
+    removeListeners = Nil
+    refs = Nil
+  }
 }
 
 /**

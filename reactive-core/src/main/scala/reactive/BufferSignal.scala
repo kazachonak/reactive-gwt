@@ -18,12 +18,14 @@ class BufferSignal[T] extends SeqSignal[T] {
     change fire now
   }
   val now = new DeltaSeq[T] {
-    def signal = BufferSignal.this
+    def signal(implicit observing: Observing) = BufferSignal.this
     val underlying = BufferSignal.this.underlying
-    val fd = underlying.messages hold DeltaSeq.startDelta(underlying)
+    // We pass new Observing{}, because we don't ever need to manually delete event listeners
+    val fd = underlying.messages.hold(DeltaSeq.startDelta(underlying))(new Observing{})
     def fromDelta = fd.now
   }
-  underlying.messages addListener dl
+  // We pass new Observing{}, because we don't ever need to manually delete event listeners
+  underlying.messages.addListener(dl, new Observing{})
 
   /**
    * Override this to customize the comparator used

@@ -6,10 +6,11 @@ package reactive
  * deltas (SeqDeltas).
  */
 trait SeqSignal[+A] extends Signal[DeltaSeq[A]] {
+  
   /**
    * The EventStream of incremental updates (SeqDeltas) to the underlying Seq.
    */
-  lazy val deltas: EventStream[SeqDelta[A, A]] = change.map(_.fromDelta)
+  def deltas(implicit observing: Observing): EventStream[SeqDelta[A, A]] = change.map(_.fromDelta)(observing)
 
 }
 
@@ -25,7 +26,7 @@ object SeqSignal {
    */
   def apply[A](orig: Signal[Seq[A]],
                diffFunc: (Seq[A], Seq[A]) => Seq[SeqDelta[A, A]] = defaultDiffFunc[A],
-               includeInit: Boolean = true): SeqSignal[A] = new SeqSignal[A] with Logger { owner =>
+               includeInit: Boolean = true)(implicit observing: Observing): SeqSignal[A] = new SeqSignal[A] with Logger { owner =>
     val underlying: Signal[DeltaSeq[A]] = orig.foldLeft(if (includeInit) Nil else List(orig.now.toList)){
       case (old, xs) =>
         xs.toList :: old.take(1)
@@ -34,9 +35,9 @@ object SeqSignal {
       case b :: a => new DeltaSeq[A] {
         val underlying = b
         val fromDelta = Batch(diffFunc(a.headOption getOrElse Nil, b): _*)
-        val signal = owner
+        def signal(implicit observing: Observing) = owner
       }
-    }(CanMapSignal.canMapSignal)
+    }(CanMapSignal.canMapSignal, observing)
     def change = underlying.change
     def now = underlying.now
     override def toString = "SeqSignal("+now+")"
@@ -47,7 +48,7 @@ object SeqSignal {
    */
   def diffStream[A](orig: Signal[Seq[A]],
                     diffFunc: (Seq[A], Seq[A]) => Seq[SeqDelta[A, A]] = defaultDiffFunc,
-                    includeInit: Boolean = false): EventStream[SeqDelta[A, A]] =
+                    includeInit: Boolean = false)(implicit observing: Observing): EventStream[SeqDelta[A, A]] =
     orig.foldLeft((Seq.empty[A], if (includeInit) Nil else orig.now)){
       case ((_, old), xs) =>
         (old.toList, xs.toList)

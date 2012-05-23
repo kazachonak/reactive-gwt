@@ -1,20 +1,21 @@
 package reactive
 
-import java.util.{Timer => juTimer, TimerTask}
+import com.google.gwt.user.client.{Timer => GwtTimer}
 
 
-private object _timer extends juTimer("reactive-core timer thread", true) {
-  def scheduleAtFixedRate(delay: Long, interval: Long)(p: =>Unit): TimerTask = {
-    val tt = new java.util.TimerTask {def run = p}
-    super.scheduleAtFixedRate(tt, delay, interval)
-    tt
+private object _timer {
+  def scheduleAtFixedRate(interval: Long)(p: =>Unit) = {
+    val t = new GwtTimer{ def run = p }
+    t.scheduleRepeating(interval.toInt)
+    t
   }
-  def schedule(delay: Long)(p: =>Unit): TimerTask = {
-    val tt = new java.util.TimerTask {def run = p}
-    super.schedule(tt, delay)
-    tt
+  def schedule(delay: Long)(p: =>Unit) = {
+    val t = new GwtTimer{ def run = p }
+    t.schedule(delay.toInt)
+    t
   }
 }
+
 
 /**
  * An EventStream that fires events at the given interval.
@@ -25,7 +26,7 @@ private object _timer extends juTimer("reactive-core timer thread", true) {
  * @param interval the frequency at which to update the signal's value. Defaults to 1 second.
  * @param until a function called with each tick that should return true to terminate the timer. By default it will never terminate.
  */
-class Timer(
+ class Timer(
   private val startValue: Long = 0,
   interval: Long = 1000,
   until: Long=>Boolean = _ =>false
@@ -33,7 +34,7 @@ class Timer(
   case class Canceling(tick: Long) extends LogEventPredicate
   
   private val origMillis = System.currentTimeMillis
-  private val tt: TimerTask = _timer.scheduleAtFixedRate(interval, interval) {
+  private val tt: GwtTimer = _timer.scheduleAtFixedRate(interval) {
     val tick = System.currentTimeMillis - origMillis + startValue
     if(until(tick)) {
       trace(Canceling(tick))
@@ -53,5 +54,5 @@ class Timer(
  */
 //TODO should this really extend Var?
 class RefreshingVar[T](interval: Long)(supplier: =>T) extends Var(supplier) {
-  _timer.scheduleAtFixedRate(interval, interval){value = supplier}
+  _timer.scheduleAtFixedRate(interval){value = supplier}
 }

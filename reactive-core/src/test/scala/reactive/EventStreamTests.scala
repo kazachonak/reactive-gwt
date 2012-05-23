@@ -16,7 +16,7 @@ trait CollectEvents {
     var executing = true
     es.takeWhile{ _ =>
       executing
-    }.foreach{ e =>
+    }(observing1).foreach{ e =>
       log :+= e
     }(observing1)
     f
@@ -181,31 +181,31 @@ class EventStreamTests extends FunSuite with ShouldMatchers with CollectEvents w
     if (weakref.get.isDefined) info("Warning - takeWhile EventSource was not gc'ed")
   }
 
-  test("zipWithStaleness+nonblocking") {
-    val es = new EventSource[Int]
-    object last {
-      var value = 0
-    }
-    es.zipWithStaleness.nonblocking.foreach {
-      case (n, isStale) =>
-        for (b <- 1 to 10 if !isStale()) {
-          last.synchronized {
-            (n != last.value) should equal (isStale())
-          }
-          Thread.sleep(250)
-        }
-    }
-    last.synchronized {
-      last.value = 2
-      es fire 2
-    }
-    Thread.sleep(250)
-    last.synchronized {
-      last.value = 3
-      es fire 3
-    }
-    Thread.sleep(2250)
-  }
+//  test("zipWithStaleness+nonblocking") {
+//    val es = new EventSource[Int]
+//    object last {
+//      var value = 0
+//    }
+//    es.zipWithStaleness.nonblocking.foreach {
+//      case (n, isStale) =>
+//        for (b <- 1 to 10 if !isStale()) {
+//          last.synchronized {
+//            (n != last.value) should equal (isStale())
+//          }
+//          Thread.sleep(250)
+//        }
+//    }
+//    last.synchronized {
+//      last.value = 2
+//      es fire 2
+//    }
+//    Thread.sleep(250)
+//    last.synchronized {
+//      last.value = 3
+//      es fire 3
+//    }
+//    Thread.sleep(2250)
+//  }
 
   test("distinct") {
     val es = new EventSource[Int]
@@ -222,7 +222,7 @@ class EventStreamTests extends FunSuite with ShouldMatchers with CollectEvents w
 
   test("throttle") {
     val es = new EventSource[Int]
-    val t = new es.Throttled(100)
+    val t = new es.Throttled(100, new Observing {})
     def pause(idealTime: Long, test: Long => Boolean)(cont: => Boolean): Boolean = {
       val t = System.currentTimeMillis
       Thread sleep idealTime
