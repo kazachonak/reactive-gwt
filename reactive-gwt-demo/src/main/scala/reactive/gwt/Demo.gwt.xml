@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module rename-to="demo">
+    <inherits name='ScalaLibrary' />
+    <inherits name='com.google.gwt.user.User' />
+    <inherits name="Reactive" />
+
+    <entry-point class='reactive.gwt.demo.DemosEntryPoint' />
+
+    <source path='demo' />
+</module>

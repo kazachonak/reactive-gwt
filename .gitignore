@@ -1,5 +1,5 @@
 target/
-lib/
+*.jar
 .scala_dependencies
 project/boot/
 */project/boot/
