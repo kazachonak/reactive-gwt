@@ -1,7 +1,4 @@
-This is the reactive top-level repository. It contains the following subprojects:
+This is a fork of github.com/nafg/reactive library. It adds support for working with Google Web Toolkit.
 
-# reactive-core: This is the general-purpose FRP library
-# reactive-web: This allows you do create dynamic Lift pages with FRP
-# reactive-web-demo: demo, serves as documentation for the above two, and can be viewed live at "http://reactive-web.tk":http://reactive-web.tk
-
-See the READMEs in the individual projects, and the wiki pages, for more details.
+reactive-gwt-demo is a demo project
+It uses unreleased versions of Scala and GWT. The quickest way to setup a working build was ant. So to build it you need to run 'ant' inside 'reactive-gwt-demo/lib', and then run 'ant' inside 'reactive-gwt-demo'. You can also run "ant devmode" to run the demo in GWT devmode.
