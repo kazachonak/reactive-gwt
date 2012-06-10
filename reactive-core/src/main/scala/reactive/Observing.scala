@@ -47,16 +47,16 @@ trait Observing {
   
   
   private[reactive] def onRemove(f: () => Unit) = {
-    removeListeners :+= f
+    listenerRemovers :+= f
   }
-  private var removeListeners: List[() => Unit] = Nil
+  private var listenerRemovers: List[() => Unit] = Nil
   
   /**
-   * Don't forget to call it!
+   * Call it when you don't need that observing anymore.
    */
-  def removeReactiveListeners = {
-    removeListeners.foreach(_())
-    removeListeners = Nil
+  def removeAllListeners = {
+    listenerRemovers.foreach(_())
+    listenerRemovers = Nil
     refs = Nil
   }
 }
