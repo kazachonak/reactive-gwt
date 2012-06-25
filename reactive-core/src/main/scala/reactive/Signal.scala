@@ -326,6 +326,12 @@ trait Var[T] extends Signal[T] {
    * Usage: var() = x
    */
   def update(v: T)
+
+  def <-->(other: Var[T])(implicit observing: Observing): this.type = {
+    this.distinct >> other
+    other.distinct >> this
+    this
+  }
 }
 
 /**
@@ -369,12 +375,6 @@ class SimpleVar[T](initial: T) extends Var[T] {
   }
 
   override def toString = "SimpleVar("+now+")"
-
-  def <-->(other: Var[T])(implicit observing: Observing): this.type = {
-    this.distinct >> other
-    other.distinct >> this
-    this
-  }
 
 }
 
