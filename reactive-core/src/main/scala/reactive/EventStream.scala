@@ -178,7 +178,7 @@ trait EventStream[+T] extends Forwardable[T] {
   def throttle(period: Long)(implicit observing: Observing): EventStream[T]
 
   private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit
-  private[reactive] def removeListener(f: (T) => Unit): Unit
+  private[reactive] def removeListener(f: (T) => Unit, observing: Observing): Unit
 
   def debugString: String
   def debugName: String
@@ -227,7 +227,7 @@ class EventSource[T] extends EventStream[T] with Logger {
     val thunk: U => Unit = fire _
     state foreach { _.addListener(thunk, observing) }
     def handler = (parentEvent, lastES) => {
-      lastES foreach { _ removeListener thunk }
+      lastES foreach { _.removeListener(thunk, observing) }
       val newES = Some(f(parentEvent))
       newES foreach { _.addListener(thunk, observing) }
       newES
@@ -344,8 +344,8 @@ class EventSource[T] extends EventStream[T] with Logger {
   }
 
   def foreach(f: T => Unit)(implicit observing: Observing): Unit = {
-    observing.addRef(f)
-    observing.addRef(this)
+//    observing.addRef(f)
+//    observing.addRef(this)
     addListener(f, observing)
     trace(AddedForeachListener(f))
     trace(HasListeners(listeners))
@@ -366,7 +366,7 @@ class EventSource[T] extends EventStream[T] with Logger {
         if (p(event))
           fire(event)
         else
-          EventSource.this.removeListener(listener)
+          EventSource.this.removeListener(listener, observing)
     }
   }
 
@@ -437,14 +437,21 @@ class EventSource[T] extends EventStream[T] with Logger {
 
 //  def nonblocking: EventStream[T] = new ActorEventStream
 
-  private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit = synchronized {
+  private[reactive] def addListener(f: T=>Unit, observing: Observing): Unit = synchronized {
     trace(AddingListener(f))
-    observing.onRemove(() => removeListener(f))
     listeners :+= f
+    observing.addListenerToRemove(this, f)
   }
-  private[reactive] def removeListener(f: (T) => Unit): Unit = synchronized {
+
+  private[reactive] def removeListener(f: T=>Unit, observing: Observing): Unit = synchronized {
+    removeListenerJustHere(f)
+    observing.removeListenerToRemove(this, f)
+    // TODO: if (listeners.size == 0) is there a point in having this EventSource alive anymore?
+  }
+
+  private[reactive] def removeListenerJustHere(f: AnyRef): Unit = synchronized {
     //remove the last listener that is identical to f
-    listeners.lastIndexOf(f) match {
+    listeners.lastIndexOf(f.asInstanceOf[T=>Unit]) match {
       case -1 =>
       case n =>
         listeners = listeners.patch(n, Nil, 1)
@@ -557,6 +564,6 @@ trait EventStreamProxy[T] extends EventStream[T] {
 //  def nonblocking: EventStream[T] = self.nonblocking
   def zipWithStaleness(implicit observing: Observing): EventStream[(T, () => Boolean)] = self.zipWithStaleness(observing)
   private[reactive] def addListener(f: (T) => Unit, observing: Observing): Unit = self.addListener(f, observing)
-  private[reactive] def removeListener(f: (T) => Unit): Unit = self.removeListener(f)
+  private[reactive] def removeListener(f: (T) => Unit, observing: Observing): Unit = self.removeListener(f, observing)
 
 }

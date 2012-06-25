@@ -1,5 +1,7 @@
 package reactive
 
+import scala.collection.mutable.ListBuffer
+
 
 /**
  * Keeps a list of strong references. Used to control when observers
@@ -23,13 +25,7 @@ trait Observing {
    * Places an implicit reference to 'this' in scope
    */
   implicit val observing: Observing = this
-  private var refs = List[AnyRef]()
-  private[reactive] def addRef(ref: AnyRef): Unit = synchronized { refs ::= ref }
-  private[reactive] def removeRef(ref: AnyRef): Unit = synchronized {
-    refs = refs.span(ref.ne) match {
-      case (nes, firstEqs) => nes ++ firstEqs.drop(1)
-    }
-  }
+
   /**
    * You can write
    * [observing.] observe(signal){value => action}
@@ -46,18 +42,22 @@ trait Observing {
   def on[T](e: EventSource[T])(f: T => Unit) = e.foreach(f)(this)
   
   
-  private[reactive] def onRemove(f: () => Unit) = {
-    listenerRemovers :+= f
+  private[reactive] def addListenerToRemove(es: EventSource[_], listener: AnyRef) {
+    listenersToRemove += es -> listener
   }
-  private var listenerRemovers: List[() => Unit] = Nil
-  
+
+  private[reactive] def removeListenerToRemove(es: EventSource[_], listener: AnyRef) {
+    listenersToRemove -= es -> listener
+  }
+
+  private var listenersToRemove: ListBuffer[(EventSource[_], AnyRef)] = ListBuffer()
+
   /**
    * Call it when you don't need that observing anymore.
    */
   def removeAllListeners = {
-    listenerRemovers.foreach(_())
-    listenerRemovers = Nil
-    refs = Nil
+    listenersToRemove.foreach{case (es, listener) => es.removeListenerJustHere(listener, this)}
+    listenersToRemove.clear
   }
 }
 
@@ -65,7 +65,7 @@ trait Observing {
  * An Observing that, rather than maintaining references itself,
  * maintains a List of Observings that all maintain all references.
  */
-trait ObservingGroup extends Observing {
-  protected def observings: List[Observing]
-  override private[reactive] def addRef(ref: AnyRef) = observings foreach {_.addRef(ref)}
-}
+//trait ObservingGroup extends Observing {
+//  protected def observings: List[Observing]
+//  override private[reactive] def addRef(ref: AnyRef) = observings foreach {_.addRef(ref)}
+//}
