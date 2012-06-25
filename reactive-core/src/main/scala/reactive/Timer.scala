@@ -53,6 +53,6 @@ private object _timer {
  * @param supplier a call-by-name that calculates the signal's value
  */
 //TODO should this really extend Var?
-class RefreshingVar[T](interval: Long)(supplier: =>T) extends Var(supplier) {
+class RefreshingVar[T](interval: Long)(supplier: =>T) extends SimpleVar(supplier) {
   _timer.scheduleAtFixedRate(interval){value = supplier}
 }

@@ -3,7 +3,7 @@ package reactive
 /**
  * Convenience class for a Var that is a SeqSignal.
  */
-class SeqVar[A](init: A*) extends Var(DeltaSeq.fromSeq(init)) with SeqSignal[A]
+class SeqVar[A](init: A*) extends SimpleVar(DeltaSeq.fromSeq(init)) with SeqSignal[A]
 
 /**
  * This SeqSignal contains a Buffer which you can modify directly,

@@ -283,7 +283,7 @@ protected class FlatMappedSignal[T, U](parent: Signal[T], f: T => Signal[U], obs
   }
   state.change.addListener(thunk, observing)
   def parentHandler = (x, curSig) => {
-    curSig.change removeListener thunk
+    curSig.change.removeListener(thunk, observing)
     val newSig = f(x)
     thunk(newSig.now)
     newSig.change.addListener(thunk, observing)
@@ -321,18 +321,25 @@ case class Val[T](now: T) extends Signal[T] {
   def change = new EventSource[T] {}
 }
 
+trait Var[T] extends Signal[T] {
+  /**
+   * Usage: var() = x
+   */
+  def update(v: T)
+}
+
 /**
  * Defines a factory and extractor for Vars
  */
 object Var {
-  def apply[T](v: T) = new Var(v)
+  def apply[T](v: T) = new SimpleVar(v)
   def unapply[T](v: Var[T]) = Some(v.now)
 }
 /**
  * A signal whose value can be changed directly
  */
-class Var[T](initial: T) extends Signal[T] {
-  override def debugName = "Var(%s)" format now
+class SimpleVar[T](initial: T) extends Var[T] {
+  override def debugName = "SimpleVar(%s)" format now
   private var _value = initial
 
   def now = value
@@ -341,26 +348,27 @@ class Var[T](initial: T) extends Signal[T] {
   // 'var.value += 2' works; 'var ()+= 2' does not work.
   def value = _value
   /**
+   * Usage: var() = x
+   */
+  final def update(v: T) = value = v
+  /**
    * Setter. Usage: var.value = x
    */
   def value_=(v: T) {
     _value = v
     change0.fire(v)
   }
-  /**
-   * Usage: var()=x
-   */
-  final def update(v: T) = value = v
+  
 
   /**
    * Fires an event after every mutation, consisting of the new value
    */
   lazy val change: EventStream[T] = change0
   private lazy val change0 = new EventSource[T] {
-    override def debugName = Var.this.debugName+".change"
+    override def debugName = SimpleVar.this.debugName+".change"
   }
 
-  override def toString = "Var("+now+")"
+  override def toString = "SimpleVar("+now+")"
 
   def <-->(other: Var[T])(implicit observing: Observing): this.type = {
     this.distinct >> other
