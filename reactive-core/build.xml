@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<project name="reactive-gwt" default="build" basedir="." xmlns:ivy="antlib:org.apache.ivy.ant">
+  <!-- Arguments -style PRETTY or -logLevel DEBUG or -draftCompile or -ea to gwtc and devmode targets -->
+  <property name="gwt.args" value="-optimize 9" />
+  <property name="gwt.dev.args" value="-logLevel TRACE" />
+  <property name="scala.args" value="-g:notailcalls -Yjribble-text" />
+
+  <path id="scala.class.path">
+    <fileset dir="lib">
+      <include name="scala-compiler.jar" />
+      <include name="scala-library.jar" />
+    </fileset>
+  </path>
+
+  <path id="project.class.path">
+    <pathelement location="target/classes" />
+    <pathelement location="lib/gwt-user.jar" />
+    <pathelement location="lib/gwt-dev.jar" />
+    <pathelement location="lib/gwt-servlet.jar" />
+    <pathelement location="lib/gwt-servlet-deps.jar" />
+    <pathelement location="lib/validation-api.jar" />
+    <pathelement location="lib/scala-library-gwt.jar" />
+  </path>
+
+  <taskdef name="scalac" classname="scala.tools.ant.Scalac" classpathref="scala.class.path" />
+
+  <target name="scalac" description="Scalac compile to jribble">
+    <mkdir dir="target/classes" />
+    <scalac destdir="target/classes" target="jribble" addparams="${scala.args}">
+      <src>
+        <pathelement location="src/main/scala" />
+      </src>
+      <include name="**/*.scala" />
+      <include name="**/*.java" />
+      <classpath refid="project.class.path" />
+    </scalac>
+    <javac srcdir="src/main/scala" destdir="target/classes">
+      <classpath refid="project.class.path" />
+    </javac>
+    <copy todir="target/classes">
+      <fileset dir="src/main/scala">
+        <exclude name="**/*.scala" />
+      </fileset>
+    </copy>
+  </target>
+
+  <target name="build" depends="jar" description="Build this project" />
+
+  <target name="jar" depends="scalac" description="Create a jar file">
+    <zip destfile="reactive.jar" basedir="target/classes" />
+  </target>
+
+  <target name="clean" description="Cleans this project">
+    <delete dir="target/classes" failonerror="false" />
+    <delete dir="jribbleCache" failonerror="false" />
+    <delete file="reactive.jar" />
+  </target>
+
+</project>
